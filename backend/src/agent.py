@@ -1,4 +1,7 @@
 import logging
+import json
+from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -12,8 +15,8 @@ from livekit.agents import (
     cli,
     metrics,
     tokenize,
-    # function_tool,
-    # RunContext
+    function_tool,
+    RunContext
 )
 from livekit.plugins import murf, silero, noise_cancellation
 from livekit.plugins import google
@@ -22,32 +25,77 @@ logger = logging.getLogger("agent")
 
 load_dotenv(".env.local")
 
+# Order state to track coffee orders
+order_state = {
+    "drinkType": None,
+    "size": None,
+    "milk": None,
+    "extras": [],
+    "name": None
+}
+
 
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
-            instructions="""You are a helpful voice AI assistant. The user is interacting with you via voice, even if you perceive the conversation as text.
-            You eagerly assist users with their questions by providing information from your extensive knowledge.
-            Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
-            You are curious, friendly, and have a sense of humor.""",
+            instructions="""You are a friendly barista at 'Brew & Bloom Coffee Shop'. The user is interacting with you via voice.
+            
+            Your job is to take coffee orders by asking questions to fill out this order:
+            - Drink type (e.g., latte, cappuccino, americano, espresso, cold brew, mocha)
+            - Size (small, medium, large)
+            - Milk preference (whole milk, 2%, oat milk, almond milk, soy milk, or none)
+            - Extras (whipped cream, extra shot, vanilla syrup, caramel drizzle, etc.)
+            - Customer's name for the order
+            
+            Be conversational and friendly. Ask one question at a time. When all information is collected, 
+            confirm the order and let the customer know you're saving it. Then use the save_order tool.
+            
+            Keep responses natural and short - you're having a voice conversation, not writing an essay.
+            Don't use any formatting, emojis, asterisks, or symbols in your responses.""",
         )
 
-    # To add tools, use the @function_tool decorator.
-    # Here's an example that adds a simple weather tool.
-    # You also have to add `from livekit.agents import function_tool, RunContext` to the top of this file
-    # @function_tool
-    # async def lookup_weather(self, context: RunContext, location: str):
-    #     """Use this tool to look up current weather information in the given location.
-    #
-    #     If the location is not supported by the weather service, the tool will indicate this. You must tell the user the location's weather is unavailable.
-    #
-    #     Args:
-    #         location: The location to look up weather information for (e.g. city name)
-    #     """
-    #
-    #     logger.info(f"Looking up weather for {location}")
-    #
-    #     return "sunny with a temperature of 70 degrees."
+    @function_tool
+    async def save_order(self, context: RunContext):
+        """Save the completed coffee order to a JSON file.
+        
+        Use this tool when you have collected all required information:
+        drinkType, size, milk, extras, and name.
+        """
+        global order_state
+        
+        logger.info(f"Saving order: {order_state}")
+        
+        # Create orders directory if it doesn't exist
+        orders_dir = Path("orders")
+        orders_dir.mkdir(exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = orders_dir / f"order_{timestamp}.json"
+        
+        # Add timestamp to order
+        order_data = {
+            **order_state,
+            "timestamp": datetime.now().isoformat(),
+            "status": "received"
+        }
+        
+        # Save to JSON file
+        with open(filename, 'w') as f:
+            json.dump(order_data, f, indent=2)
+        
+        logger.info(f"Order saved to {filename}")
+        
+        # Reset order state for next customer
+        order_state.update({
+            "drinkType": None,
+            "size": None,
+            "milk": None,
+            "extras": [],
+            "name": None
+        })
+        
+        return f"Order saved successfully! Your order will be ready soon. Have a great day!"
 
 
 def prewarm(proc: JobProcess):
